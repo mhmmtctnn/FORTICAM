@@ -1,0 +1,6 @@
+[client]
+toolbarMode = "viewer" # Geliştirici araç çubuğunu gizle
+showSidebarNavigation = false # Gerekirse kenar çubuğu navigasyonunu gizle
+
+[ui]
+hideTopBar = true # Üst çubuğu tamamen gizle (Streamlit'in yeni sürümleri için)

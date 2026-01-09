@@ -1,0 +1,6 @@
+streamlit
+requests
+pandas
+pytz
+ldap3
+pyOpenSSL

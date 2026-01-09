@@ -1,0 +1,17 @@
+services:
+  fortimanager-app:
+    build: .
+    image: forticam-fortimanager-app:latest
+    container_name: fortimanager_controller
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./src:/app/src
+      - ./.streamlit:/app/.streamlit
+      - ./fmg_config.json:/app/fmg_config.json
+      - ./audit_logs.csv:/app/audit_logs.csv
+    # Network ayari
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: unless-stopped

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+fmg_config.json
+audit_logs.csv
+.env
+.venv/
+dist/
+build/
+*.exe
+*.tar
+1.png
+2.png
+3.png
+4.png
