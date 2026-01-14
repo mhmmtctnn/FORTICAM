@@ -7,6 +7,8 @@ services:
       - "8501:8501"
     volumes:
       - ./src:/app/src
+      - ./MFA Background:/app/MFA Background
+      - ./MFA Logo:/app/MFA Logo
       - ./.streamlit:/app/.streamlit
       - ./fmg_config.json:/app/fmg_config.json
       - ./audit_logs.csv:/app/audit_logs.csv

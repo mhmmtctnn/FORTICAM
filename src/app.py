@@ -15,8 +15,28 @@ from api_client import FortiManagerAPI
 from system_service import SystemService
 from settings_view import render_settings
 
+# --- CACHED DATA FUNCTIONS ---
+@st.cache_data(ttl=60, show_spinner=False)
+def get_cached_devices(_api):
+    """Caches device list for 60 seconds."""
+    if not _api: return []
+    return _api.get_devices() or []
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_cached_vdoms(_api, device_name):
+    """Caches VDOM list for 30 seconds."""
+    if not _api: return ["root"]
+    return _api.get_vdoms(device_name)
+
+@st.cache_data(ttl=10, show_spinner=False)
+def get_cached_interfaces(_api, device_name, vdom):
+    """Caches interface list for 10 seconds."""
+    if not _api: return []
+    return _api.get_interfaces(device_name, vdom=vdom)
+
 # --- INITIALIZATION ---
 UI.init_page()
+# UI.set_bg_image moved to authenticated section
 
 # Global State Init
 if 'fmg_connected' not in st.session_state: st.session_state.fmg_connected = False
@@ -47,7 +67,8 @@ if not st.session_state.fmg_connected:
     token = cfg.get("api_token")
     if ip and token:
         try:
-            api = FortiManagerAPI(ip, None, None, token)
+            # Hizli baslangic icin kisa timeout
+            api = FortiManagerAPI(ip, None, None, token, timeout=2)
             if api.login():
                 st.session_state.api = api
                 st.session_state.fmg_connected = True
@@ -144,35 +165,30 @@ def render_dashboard():
         return
 
     api = st.session_state.api
-    if not st.session_state.devices:
-        with st.spinner("Cihazlar getiriliyor..."):
-            devices_res = api.get_devices()
-            if devices_res is None:
-                st.error(f"❌ FortiManager'a erişilemiyor ({st.session_state.fmg_ip}).")
-                return
-            st.session_state.devices = devices_res
+    
+    with st.spinner("Cihazlar getiriliyor..."):
+        devices_res = get_cached_devices(api)
             
-    if not st.session_state.devices:
+    if not devices_res:
         st.info("Yönetilen cihaz bulunamadı.")
         return
 
     col_dev, col_vdom = st.columns([3, 1])
-    device_names = [d['name'] for d in st.session_state.devices]
+    device_names = [d['name'] for d in devices_res]
+    
     with col_dev:
         sel_dev = st.selectbox("Firewall", device_names)
     
     vdoms = ["root"]
     if sel_dev:
-        if sel_dev not in st.session_state.vdoms_cache:
-            st.session_state.vdoms_cache[sel_dev] = api.get_vdoms(sel_dev)
-        vdoms = st.session_state.vdoms_cache[sel_dev]
+        vdoms = get_cached_vdoms(api, sel_dev)
+    
     with col_vdom:
         sel_vdom = st.selectbox("VDOM", vdoms)
 
     # Kullanici Yetki Seviyesini Al
     user = AuthService.get_current_user()
-    from config_service import ConfigService
-    cfg = ConfigService.load_config()
+    cfg = st.session_state.saved_config
     target_profile = next((p for p in cfg.get("admin_profiles", []) if p['name'] == user.role), None)
     
     # Dashboard yetki seviyesi (Default 0)
@@ -183,7 +199,7 @@ def render_dashboard():
     # Filtreleme Secenegi
     show_sub_ifaces = st.sidebar.checkbox("Sanal ve Alt Arayüzleri Göster (VLAN vb.)", value=False)
     
-    raw_interfaces = api.get_interfaces(sel_dev, vdom=sel_vdom)
+    raw_interfaces = get_cached_interfaces(api, sel_dev, sel_vdom)
     
     # Clean Code: Logic helper fonksiyonuna tasindi
     filtered_interfaces = filter_interfaces_for_display(raw_interfaces, user, sel_dev, show_sub_ifaces)
@@ -192,8 +208,6 @@ def render_dashboard():
         if not raw_interfaces:
             st.warning("Cihazdan port bilgisi alınamadı.")
         else:
-            # Eger raw veri var ama filtre sonucu bossa, yetki veya gorunum filtresine takilmistir.
-            # Kullaniciya daha anlamli mesaj verelim.
             st.warning("Görüntülenecek port bulunamadı (Yetkiniz olmayabilir veya filtre kriterlerine uymuyor).")
         
     for iface in filtered_interfaces:
@@ -233,11 +247,18 @@ def render_dashboard():
                 # YETKİ KONTROLÜ: Sadece Read-Write (2) ise butonu aktif et
                 can_edit = (dash_perm == 2)
                 
-                if c4.button(btn_lbl, key=f"{sel_dev}_{sel_vdom}_{iface['name']}", type=btn_type, use_container_width=True, disabled=not can_edit):
+                # Unique key
+                btn_key = f"{sel_dev}_{sel_vdom}_{iface['name']}"
+                
+                if c4.button(btn_lbl, key=btn_key, type=btn_type, use_container_width=True, disabled=not can_edit):
                     with st.spinner("İşleniyor..."):
                         success, msg = api.toggle_interface(sel_dev, iface['name'], target, vdom=sel_vdom)
-                        user = AuthService.get_current_user().username
-                        LogService.log_action(user, f"Port {target.upper()}", f"{sel_dev}[{sel_vdom}]", msg)
+                        user_obj = AuthService.get_current_user()
+                        LogService.log_action(user_obj.username, f"Port {target.upper()}", f"{sel_dev}[{sel_vdom}]", msg)
+                        
+                        # Cache temizle
+                        get_cached_interfaces.clear()
+                        
                         if success:
                             if "Task:" in msg:
                                 track_task(api, msg.split("Task:")[1].strip().replace(")", ""))
@@ -356,6 +377,7 @@ def render_guide():
 def main():
     if not AuthService.is_authenticated(): UI.login_screen()
     else:
+        UI.set_bg_image("MFA Background/Background_B.jpg")
         page = UI.sidebar_menu()
         if page == "Dashboard": render_dashboard()
         elif page == "FMG Bağlantısı": render_fmg_connection()

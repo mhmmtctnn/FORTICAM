@@ -5,6 +5,8 @@ WORKDIR /app
 # Gerekli dosyaları kopyala
 COPY requirements.txt .
 COPY src/ ./src/
+COPY ["MFA Background/", "./MFA Background/"]
+COPY ["MFA Logo/", "./MFA Logo/"]
 
 # Bağımlılıkları yükle
 RUN pip install --no-cache-dir -r requirements.txt

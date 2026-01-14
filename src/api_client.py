@@ -1,68 +1,84 @@
 import requests
 import json
 import logging
+from typing import Optional, List, Dict, Union, Any
 
 # Loglama ayarları
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FortiManagerAPI:
-    def __init__(self, fmg_ip, username=None, password=None, api_token=None, verify_ssl=False):
+    def __init__(self, fmg_ip: str, username: Optional[str] = None, password: Optional[str] = None, 
+                 api_token: Optional[str] = None, verify_ssl: bool = False, timeout: int = 15):
         self.base_url = f"https://{fmg_ip}/jsonrpc"
         self.username = username
         self.password = password
         self.api_token = api_token
         self.verify_ssl = verify_ssl
+        self.timeout = timeout
         self.session_id = None
         self.id_counter = 1
         
+        # Use requests.Session for connection pooling
+        self.session = requests.Session()
         if not verify_ssl:
             requests.packages.urllib3.disable_warnings()
+            self.session.verify = False
+        else:
+            self.session.verify = True
 
-    def _post(self, method, params, session=None):
+    def _post(self, method: str, params: List[Dict], session_id: Optional[str] = None) -> Optional[Dict]:
         payload = {
             "method": method,
             "params": params,
             "id": self.id_counter
         }
+        
         if not self.api_token:
-            payload["session"] = session or self.session_id
+            payload["session"] = session_id or self.session_id
         
         self.id_counter += 1
-        headers = {}
+        
+        # Headers optimization
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
         
         try:
-            response = requests.post(
+            response = self.session.post(
                 self.base_url, 
                 json=payload, 
                 headers=headers,
-                verify=self.verify_ssl,
-                timeout=15 # Timeout artırıldı
+                timeout=self.timeout
             )
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            logger.error(f"API Hatası: {e}")
+            logger.error(f"API Connection Error: {e}")
+            return None
+        except json.JSONDecodeError:
+            logger.error("Invalid JSON response from FMG")
             return None
 
-    def login(self):
+    def login(self) -> bool:
         """
         Token geçerliliğini ve bağlantıyı kontrol eder.
         """
         if self.api_token:
-            logger.info("Bağlantı kontrol ediliyor...")
+            logger.info("Checking API Token and Connection...")
             # Token ve bağlantı kontrolü için basit bir sorgu
             res = self._post("get", [{"url": "/sys/status"}])
             if res and 'result' in res and res['result'][0]['status']['code'] == 0:
-                logger.info("Bağlantı başarılı.")
+                logger.info("Connection Successful.")
                 return True
             else:
-                logger.error(f"Bağlantı veya Token hatası: {json.dumps(res)}")
+                logger.error(f"Connection Failed: {json.dumps(res)}")
                 return False
 
-        logger.error("Login Başarısız: API Token zorunludur.")
+        logger.error("Login Failed: API Token is mandatory.")
         return False
 
     def get_devices(self):
